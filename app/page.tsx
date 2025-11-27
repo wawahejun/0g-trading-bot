@@ -3,15 +3,19 @@
 import { useState } from 'react';
 import { ConnectButton } from '@rainbow-me/rainbowkit';
 import { use0GBroker } from '@/hooks/use0GBroker';
-import LedgerManager from '@/components/LedgerManager';
-import ServiceVerifier from '@/components/ServiceVerifier';
-import ChatInterface from '@/components/ChatInterface';
+import dynamic from 'next/dynamic';
+
+// Dynamically import components with SSR disabled to fix indexedDB error
+const LedgerManager = dynamic(() => import('@/components/LedgerManager'), { ssr: false });
+const ServiceVerifier = dynamic(() => import('@/components/ServiceVerifier'), { ssr: false });
+const ChatInterface = dynamic(() => import('@/components/ChatInterface'), { ssr: false });
 
 type Tab = 'ledger' | 'service' | 'chat';
 
 export default function Home() {
     const [activeTab, setActiveTab] = useState<Tab>('ledger');
     const { broker, isLoading, error } = use0GBroker();
+    const [selectedService, setSelectedService] = useState<string>('');
 
     const tabs = [
         { id: 'ledger' as Tab, label: '账户管理', icon: '💰' },
@@ -63,8 +67,8 @@ export default function Home() {
                             key={tab.id}
                             onClick={() => setActiveTab(tab.id)}
                             className={`px-6 py-3 rounded-lg font-medium transition-all ${activeTab === tab.id
-                                    ? 'bg-gradient-to-r from-primary to-primary/80 text-white shadow-lg shadow-primary/25'
-                                    : 'hover:bg-white/5'
+                                ? 'bg-gradient-to-r from-primary to-primary/80 text-white shadow-lg shadow-primary/25'
+                                : 'hover:bg-white/5'
                                 }`}
                         >
                             <span className="mr-2">{tab.icon}</span>
@@ -76,8 +80,20 @@ export default function Home() {
                 {/* Tab Content */}
                 <div className="animate-fade-in">
                     {activeTab === 'ledger' && <LedgerManager broker={broker} />}
-                    {activeTab === 'service' && <ServiceVerifier broker={broker} />}
-                    {activeTab === 'chat' && <ChatInterface broker={broker} />}
+                    {activeTab === 'service' && (
+                        <ServiceVerifier
+                            broker={broker}
+                            selectedService={selectedService}
+                            onServiceSelect={setSelectedService}
+                        />
+                    )}
+                    {activeTab === 'chat' && (
+                        <ChatInterface
+                            broker={broker}
+                            selectedService={selectedService}
+                            onServiceSelect={setSelectedService}
+                        />
+                    )}
                 </div>
             </div>
 

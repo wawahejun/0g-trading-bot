@@ -254,17 +254,24 @@ export default function LedgerManager({ broker }: LedgerManagerProps) {
                 </div>
 
                 {ledgerInfo && (
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div className="bg-white/5 rounded-lg p-4">
-                            <p className="text-sm text-muted-foreground mb-1">账本余额</p>
-                            <p className="text-2xl font-bold text-primary">
-                                {ledgerInfo.balance ? formatEther(BigInt(ledgerInfo.balance.toString())) : '0'} A0GI
-                            </p>
+                    <div className="space-y-4">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div className="bg-white/5 rounded-lg p-4">
+                                <p className="text-sm text-muted-foreground mb-1">总余额</p>
+                                <p className="text-2xl font-bold text-primary">
+                                    {ledgerInfo.balance ? formatEther(BigInt(ledgerInfo.balance.toString())) : '0'} A0GI
+                                </p>
+                            </div>
+                            <div className="bg-white/5 rounded-lg p-4">
+                                <p className="text-sm text-muted-foreground mb-1">账本地址</p>
+                                <p className="text-sm font-mono truncate">
+                                    {ledgerInfo.address}
+                                </p>
+                            </div>
                         </div>
-                        <div className="bg-white/5 rounded-lg p-4">
-                            <p className="text-sm text-muted-foreground mb-1">账本地址</p>
-                            <p className="text-sm font-mono truncate">
-                                {ledgerInfo.address}
+                        <div className="bg-blue-500/10 border border-blue-500/20 rounded-lg p-4">
+                            <p className="text-sm text-blue-400">
+                                💡 提示：充值后请等待30秒让交易确认，然后刷新页面重新连接钱包。
                             </p>
                         </div>
                     </div>

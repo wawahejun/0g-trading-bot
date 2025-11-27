@@ -48,6 +48,11 @@ const isAcknowledged = await broker.inference.userAcknowledged(providerAddress);
 
 ### 4. Chat 对话
 ```typescript
+// 获取服务元数据（包含endpoint和model）
+const metadata = await broker.inference.getServiceMetadata(providerAddress);
+const endpoint = metadata.endpoint;  // 或 metadata.url（向后兼容）
+const model = metadata.model;
+
 // 获取请求头（包含认证信息）
 const headers = await broker.inference.getRequestHeaders(
   providerAddress,
@@ -57,7 +62,7 @@ const headers = await broker.inference.getRequestHeaders(
 // 发送请求到 AI 服务
 const response = await fetch(`${endpoint}/chat/completions`, {
   method: 'POST',
-  headers: { ...headers },
+  headers: { 'Content-Type': 'application/json', ...headers },
   body: JSON.stringify({ messages, model, stream: true })
 });
 ```

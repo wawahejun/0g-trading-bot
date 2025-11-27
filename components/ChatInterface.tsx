@@ -11,15 +11,18 @@ interface Message {
 
 interface ChatInterfaceProps {
     broker: any;
+    selectedService?: string;
+    onServiceSelect?: (service: string) => void;
 }
 
-export default function ChatInterface({ broker }: ChatInterfaceProps) {
+export default function ChatInterface({ broker, selectedService, onServiceSelect }: ChatInterfaceProps) {
     const [messages, setMessages] = useState<Message[]>([]);
     const [input, setInput] = useState('');
-    const [providerAddress, setProviderAddress] = useState('');
-    const [model, setModel] = useState('meta-llama/Llama-3.2-3B-Instruct');
+    const [providerAddress, setProviderAddress] = useState(selectedService || '');
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [services, setServices] = useState<any[]>([]);
+    const [isFetchingServices, setIsFetchingServices] = useState(false);
     const messagesEndRef = useRef<HTMLDivElement>(null);
 
     const scrollToBottom = () => {
@@ -29,6 +32,69 @@ export default function ChatInterface({ broker }: ChatInterfaceProps) {
     useEffect(() => {
         scrollToBottom();
     }, [messages]);
+
+    // Sync local state with prop when prop changes
+    useEffect(() => {
+        if (selectedService !== undefined) {
+            setProviderAddress(selectedService);
+        }
+    }, [selectedService]);
+
+    const handleServiceSelect = (address: string) => {
+        setProviderAddress(address);
+        if (onServiceSelect) {
+            onServiceSelect(address);
+        }
+    };
+
+    const fetchServices = async () => {
+        if (!broker) return;
+
+        try {
+            setIsFetchingServices(true);
+            console.log('Fetching service list...');
+            const list = await broker.inference.listService();
+
+            // Test each service and filter out invalid ones
+            const validServices = [];
+            for (const s of list) {
+                const address = s.provider || "";
+                if (!address) continue;
+
+                try {
+                    const metadata = await broker.inference.getServiceMetadata(address);
+                    if (metadata && metadata.model) {
+                        validServices.push({
+                            address: address,
+                            name: s.name || metadata.model || "Unknown",
+                            model: metadata.model || s.model || "Unknown",
+                        });
+                    }
+                } catch (err) {
+                    console.warn('Skipping invalid service:', address);
+                }
+            }
+
+            console.log(`Found ${validServices.length} valid services`);
+            setServices(validServices);
+
+            // If we have services and no provider selected, select the first one
+            if (validServices.length > 0 && !providerAddress) {
+                const firstAddress = validServices[0].address;
+                handleServiceSelect(firstAddress);
+            }
+        } catch (err) {
+            console.error('Failed to fetch services:', err);
+        } finally {
+            setIsFetchingServices(false);
+        }
+    };
+
+    useEffect(() => {
+        if (broker) {
+            fetchServices();
+        }
+    }, [broker]);
 
     const sendMessage = async () => {
         if (!broker || !input.trim() || !providerAddress) return;
@@ -40,9 +106,32 @@ export default function ChatInterface({ broker }: ChatInterfaceProps) {
         setError(null);
 
         try {
-            // Get service metadata for endpoint
+            // Check ledger balance first
+            console.log('===== Checking ledger balance =====');
+            const ledgerInfo = await broker.ledger.getLedger();
+            console.log('Ledger info:', ledgerInfo);
+            console.log('Total balance:', ledgerInfo?.totalBalance?.toString());
+            console.log('Available balance:', ledgerInfo?.availableBalance?.toString());
+
+            if (!ledgerInfo || !ledgerInfo.totalBalance || ledgerInfo.totalBalance.toString() === '0') {
+                throw new Error('账本余额不足或未找到账本。请先在"账户管理"页面创建账本并充值。');
+            }
+            // Get service metadata for endpoint and model (using destructuring as per 0G docs)
             const metadata = await broker.inference.getServiceMetadata(providerAddress);
-            const endpoint = metadata.url;
+
+            console.log('Service metadata:', metadata); // Debug log
+
+            // Destructure with fallback for backward compatibility
+            const endpoint = metadata.endpoint || metadata.url;
+            const model = metadata.model;
+
+            if (!endpoint) {
+                throw new Error('Service endpoint is not available. Please verify the service first in the Service Verifier tab.');
+            }
+
+            if (!model) {
+                throw new Error('Service model is not available. Please verify the service first.');
+            }
 
             // Prepare messages for API
             const apiMessages = [...messages, userMessage].map((msg) => ({
@@ -56,22 +145,25 @@ export default function ChatInterface({ broker }: ChatInterfaceProps) {
                 JSON.stringify(apiMessages)
             );
 
-            // Make request to AI service
+            console.log('Making request to:', `${endpoint}/chat/completions`); // Debug log
+
+            // Make request to AI service (endpoint is already complete URL)
             const response = await fetch(`${endpoint}/chat/completions`, {
                 method: 'POST',
                 headers: {
-                    ...headers,
                     'Content-Type': 'application/json',
+                    ...headers,
                 },
                 body: JSON.stringify({
                     messages: apiMessages,
-                    model,
+                    model: model,
                     stream: true,
                 }),
             });
 
             if (!response.ok) {
-                throw new Error(`API request failed: ${response.statusText}`);
+                const errorText = await response.text();
+                throw new Error(`API request failed: ${response.status} ${response.statusText} - ${errorText}`);
             }
 
             // Handle streaming response
@@ -133,8 +225,40 @@ export default function ChatInterface({ broker }: ChatInterfaceProps) {
                 }
             }
         } catch (err) {
-            console.error('Failed to send message:', err);
-            setError(err instanceof Error ? err.message : 'Failed to send message');
+            console.error('===== Failed to send message =====');
+            console.error('Error:', err);
+            console.error('Error details:', {
+                message: err instanceof Error ? err.message : String(err),
+                provider: providerAddress,
+            });
+
+            let errorMessage = err instanceof Error ? err.message : 'Failed to send message';
+
+            // Provide more helpful error messages
+            if (errorMessage.includes('insufficient balance')) {
+                const match = errorMessage.match(/available balance of (\d+)/);
+                const balance = match ? match[1] : '0';
+                errorMessage = `账本余额不足！\n\n` +
+                    `当前可用余额: ${balance} wei (约 ${(Number(balance) / 1e18).toFixed(6)} A0GI)\n` +
+                    `需要费用: 约 0.4 A0GI\n\n` +
+                    `解决方法:\n` +
+                    `1. 点击浏览器刷新按钮（F5）重新加载页面\n` +
+                    `2. 重新连接钱包\n` +
+                    `3. 前往"账户管理"页面点击"刷新"查看账本余额\n` +
+                    `4. 如果余额仍为0，请重新充值\n` +
+                    `5. 充值后等待30秒让交易确认，然后刷新页面`;
+            } else if (errorMessage.includes('missing revert data')) {
+                errorMessage = `无法连接到该服务提供商。\n\n` +
+                    `可能原因:\n` +
+                    `1. 该服务已下线\n` +
+                    `2. 服务地址无效\n` +
+                    `3. 网络连接问题\n\n` +
+                    `请尝试:\n` +
+                    `1. 在"服务验证"或"Chat对话"页面点击"刷新列表"\n` +
+                    `2. 选择另一个可用的服务`;
+            }
+
+            setError(errorMessage);
         } finally {
             setIsLoading(false);
         }
@@ -166,9 +290,37 @@ export default function ChatInterface({ broker }: ChatInterfaceProps) {
         <div className="space-y-6">
             {/* Configuration Card */}
             <div className="glass rounded-lg p-6 space-y-4">
-                <h3 className="text-xl font-semibold">配置</h3>
+                <div className="flex justify-between items-center">
+                    <h3 className="text-xl font-semibold">配置</h3>
+                    <button
+                        onClick={fetchServices}
+                        disabled={isFetchingServices || !broker}
+                        className="text-xs px-2 py-1 bg-white/10 hover:bg-white/20 rounded transition-colors"
+                    >
+                        {isFetchingServices ? '刷新中...' : '刷新列表'}
+                    </button>
+                </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                        <label className="block text-sm font-medium mb-2">
+                            选择服务
+                        </label>
+                        <select
+                            value={providerAddress}
+                            onChange={(e) => handleServiceSelect(e.target.value)}
+                            className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all font-mono text-sm text-white [&>option]:text-black"
+                            disabled={isLoading}
+                        >
+                            <option value="">选择一个服务...</option>
+                            {services.map((s) => (
+                                <option key={s.address} value={s.address}>
+                                    {s.name} ({s.model})
+                                </option>
+                            ))}
+                        </select>
+                    </div>
+
                     <div>
                         <label className="block text-sm font-medium mb-2">
                             提供者地址
@@ -176,26 +328,13 @@ export default function ChatInterface({ broker }: ChatInterfaceProps) {
                         <input
                             type="text"
                             value={providerAddress}
-                            onChange={(e) => setProviderAddress(e.target.value)}
+                            onChange={(e) => handleServiceSelect(e.target.value)}
                             placeholder="输入服务提供者地址"
                             className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all font-mono text-sm"
                             disabled={isLoading}
                         />
                     </div>
 
-                    <div>
-                        <label className="block text-sm font-medium mb-2">
-                            模型
-                        </label>
-                        <input
-                            type="text"
-                            value={model}
-                            onChange={(e) => setModel(e.target.value)}
-                            placeholder="模型名称"
-                            className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all font-mono text-sm"
-                            disabled={isLoading}
-                        />
-                    </div>
                 </div>
             </div>
 
@@ -218,8 +357,8 @@ export default function ChatInterface({ broker }: ChatInterfaceProps) {
                         >
                             <div
                                 className={`max-w-[80%] p-4 rounded-lg ${message.role === 'user'
-                                        ? 'bg-primary/20 text-primary-foreground'
-                                        : 'bg-white/10'
+                                    ? 'bg-primary/20 text-primary-foreground'
+                                    : 'bg-white/10'
                                     }`}
                             >
                                 <p className="text-sm whitespace-pre-wrap break-words">{message.content}</p>
