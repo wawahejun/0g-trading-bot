@@ -9,18 +9,20 @@ import dynamic from 'next/dynamic';
 const LedgerManager = dynamic(() => import('@/components/LedgerManager'), { ssr: false });
 const ServiceVerifier = dynamic(() => import('@/components/ServiceVerifier'), { ssr: false });
 const ChatInterface = dynamic(() => import('@/components/ChatInterface'), { ssr: false });
+const TradingBot = dynamic(() => import('@/components/TradingBot'), { ssr: false });
 
-type Tab = 'ledger' | 'service' | 'chat';
+type Tab = 'ledger' | 'service' | 'chat' | 'trading';
 
 export default function Home() {
     const [activeTab, setActiveTab] = useState<Tab>('ledger');
-    const { broker, isLoading, error } = use0GBroker();
+    const { broker, isLoading, error, refreshBroker } = use0GBroker();
     const [selectedService, setSelectedService] = useState<string>('');
 
     const tabs = [
         { id: 'ledger' as Tab, label: '账户管理', icon: '💰' },
         { id: 'service' as Tab, label: '服务验证', icon: '✅' },
         { id: 'chat' as Tab, label: 'Chat 对话', icon: '💬' },
+        { id: 'trading' as Tab, label: 'AI 交易助手', icon: '🤖' },
     ];
 
     return (
@@ -40,7 +42,17 @@ export default function Home() {
                                 <p className="text-sm text-muted-foreground">去中心化 AI 应用示例</p>
                             </div>
                         </div>
-                        <ConnectButton />
+                        <div className="flex items-center gap-3">
+                            <button
+                                onClick={refreshBroker}
+                                disabled={isLoading || !broker}
+                                className="px-4 py-2 bg-primary/10 hover:bg-primary/20 text-primary rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium"
+                                title="重新连接并刷新账本余额"
+                            >
+                                🔄 {isLoading ? '刷新中...' : '刷新连接'}
+                            </button>
+                            <ConnectButton />
+                        </div>
                     </div>
                 </div>
             </header>
@@ -89,6 +101,13 @@ export default function Home() {
                     )}
                     {activeTab === 'chat' && (
                         <ChatInterface
+                            broker={broker}
+                            selectedService={selectedService}
+                            onServiceSelect={setSelectedService}
+                        />
+                    )}
+                    {activeTab === 'trading' && (
+                        <TradingBot
                             broker={broker}
                             selectedService={selectedService}
                             onServiceSelect={setSelectedService}

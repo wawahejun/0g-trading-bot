@@ -31,17 +31,27 @@ export default function LedgerManager({ broker }: LedgerManagerProps) {
             console.log('Broker ledger:', broker.ledger);
             console.log('Current wallet address:', address);
 
-            // SDK 0.5.4 uses getLedger()
-            const result = await broker.ledger.getLedger();
-            console.log('Ledger query result:', result);
+            // SDK 0.5.4 uses getLedgerWithDetail() which returns array format
+            // Reference: compute-web-demo implementation
+            const { ledgerInfo } = await broker.ledger.ledger.getLedgerWithDetail();
+            console.log('===== DETAILED LEDGER QUERY RESULT =====');
+            console.log('Ledger query result (raw):', ledgerInfo);
+            console.log('Result type:', typeof ledgerInfo);
+            console.log('Result is array:', Array.isArray(ledgerInfo));
 
-            if (result && result.totalBalance !== undefined) {
+            if (ledgerInfo && Array.isArray(ledgerInfo) && ledgerInfo.length >= 2) {
+                const totalBalance = ledgerInfo[0];  // BigInt in Wei
+                const lockedBalance = ledgerInfo[1]; // BigInt in Wei
+
                 console.log('✅ Ledger found!');
-                console.log('Total balance:', result.totalBalance.toString());
-                console.log('Available balance:', result.availableBalance.toString());
+                console.log('Total balance (Wei):', totalBalance.toString());
+                console.log('Locked balance (Wei):', lockedBalance.toString());
+                console.log('Available balance (Wei):', (totalBalance - lockedBalance).toString());
 
                 setLedgerInfo({
-                    balance: result.totalBalance,
+                    totalBalance: totalBalance,
+                    lockedBalance: lockedBalance,
+                    availableBalance: totalBalance - lockedBalance,
                     address: address
                 });
                 setError(null);
@@ -255,23 +265,35 @@ export default function LedgerManager({ broker }: LedgerManagerProps) {
 
                 {ledgerInfo && (
                     <div className="space-y-4">
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                             <div className="bg-white/5 rounded-lg p-4">
                                 <p className="text-sm text-muted-foreground mb-1">总余额</p>
                                 <p className="text-2xl font-bold text-primary">
-                                    {ledgerInfo.balance ? formatEther(BigInt(ledgerInfo.balance.toString())) : '0'} A0GI
+                                    {ledgerInfo.totalBalance ? formatEther(BigInt(ledgerInfo.totalBalance.toString())) : '0'} A0GI
                                 </p>
                             </div>
                             <div className="bg-white/5 rounded-lg p-4">
-                                <p className="text-sm text-muted-foreground mb-1">账本地址</p>
-                                <p className="text-sm font-mono truncate">
-                                    {ledgerInfo.address}
+                                <p className="text-sm text-muted-foreground mb-1">可用余额</p>
+                                <p className="text-2xl font-bold text-green-400">
+                                    {ledgerInfo.availableBalance ? formatEther(BigInt(ledgerInfo.availableBalance.toString())) : '0'} A0GI
+                                </p>
+                            </div>
+                            <div className="bg-white/5 rounded-lg p-4">
+                                <p className="text-sm text-muted-foreground mb-1">锁定余额</p>
+                                <p className="text-xl font-bold text-yellow-400">
+                                    {ledgerInfo.lockedBalance ? formatEther(BigInt(ledgerInfo.lockedBalance.toString())) : '0'} A0GI
                                 </p>
                             </div>
                         </div>
+                        <div className="bg-white/5 rounded-lg p-4">
+                            <p className="text-sm text-muted-foreground mb-1">账本地址</p>
+                            <p className="text-sm font-mono truncate">
+                                {ledgerInfo.address}
+                            </p>
+                        </div>
                         <div className="bg-blue-500/10 border border-blue-500/20 rounded-lg p-4">
                             <p className="text-sm text-blue-400">
-                                💡 提示：充值后请等待30秒让交易确认，然后刷新页面重新连接钱包。
+                                💡 提示：充值成功后，点击页面右上角的"🔄 刷新连接"按钮来更新余额，无需刷新整个页面。
                             </p>
                         </div>
                     </div>

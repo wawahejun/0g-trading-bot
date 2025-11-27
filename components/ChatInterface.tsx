@@ -106,16 +106,86 @@ export default function ChatInterface({ broker, selectedService, onServiceSelect
         setError(null);
 
         try {
-            // Check ledger balance first
-            console.log('===== Checking ledger balance =====');
-            const ledgerInfo = await broker.ledger.getLedger();
-            console.log('Ledger info:', ledgerInfo);
-            console.log('Total balance:', ledgerInfo?.totalBalance?.toString());
-            console.log('Available balance:', ledgerInfo?.availableBalance?.toString());
-
-            if (!ledgerInfo || !ledgerInfo.totalBalance || ledgerInfo.totalBalance.toString() === '0') {
-                throw new Error('账本余额不足或未找到账本。请先在"账户管理"页面创建账本并充值。');
+            // ==== Service Verification Check (CRITICAL!) ====
+            // Before managing sub-accounts, we MUST verify the service is acknowledged
+            console.log('===== SERVICE VERIFICATION CHECK =====');
+            let isServiceAcknowledged = false;
+            try {
+                isServiceAcknowledged = await broker.inference.userAcknowledged(providerAddress);
+                console.log('Service acknowledged status:', isServiceAcknowledged);
+            } catch (ackErr) {
+                console.error('Failed to check acknowledgement status:', ackErr);
             }
+
+            if (!isServiceAcknowledged) {
+                throw new Error('服务未验证！\n\n在使用服务前，您必须先验证服务。\n\n请按以下步骤操作：\n1. 前往"服务验证"页面\n2. 选择当前服务（' + providerAddress.substring(0, 10) + '...）\n3. 点击"获取服务信息"\n4. 点击"验证服务"按钮\n5. 在MetaMask中确认签名\n6. 验证成功后返回"Chat对话"页面重试');
+            }
+            console.log('✅ Service is verified, proceeding with sub-account management');
+
+            // ==== Sub-account Management (based on compute-web-demo) ====
+            // 0G uses a sub-account system: main ledger holds funds,
+            // but each service requires a separate sub-account
+            console.log('===== SUB-ACCOUNT MANAGEMENT START =====');
+
+            // Step 1: Check if sub-account exists for this service
+            let subAccount;
+            try {
+                subAccount = await broker.inference.getAccount(providerAddress);
+                console.log('✅ Sub-account exists for service:', providerAddress);
+                console.log('Sub-account balance:', subAccount.balance?.toString(), 'Wei');
+                console.log('Sub-account balance (A0GI):', subAccount.balance ? (Number(subAccount.balance) / 1e18).toFixed(4) : '0');
+            } catch (error) {
+                console.log('⚠️ Sub-account does not exist, creating and funding...');
+                console.log('Transferring 2 A0GI from main ledger to sub-account...');
+
+                try {
+                    // Use single-layer ledger for transferFund (as per compute-web-demo)
+                    await broker.ledger.transferFund(
+                        providerAddress,
+                        "inference",
+                        BigInt(5e17)  // Transfer 0.5 A0GI (enough for 1-2 conversations)
+                    );
+                    console.log('✅ Sub-account created and funded with 0.5 A0GI');
+
+                    // Get the newly created account
+                    subAccount = await broker.inference.getAccount(providerAddress);
+                    console.log('New sub-account balance:', subAccount.balance?.toString(), 'Wei');
+                } catch (transferErr) {
+                    console.error('❌ Failed to create sub-account:', transferErr);
+                    throw new Error('无法创建服务子账户。\n\n可能原因：\n1. 主账本余额不足（需要至少0.5 A0GI）\n2. 网络问题或合约调用失败\n\n请前往"账户管理"页面检查余额，然后点击"🔄 刷新连接"重试。');
+                }
+            }
+
+            // Step 2: Check if sub-account has sufficient balance
+            const minBalance = BigInt(2e17); // 0.2 A0GI threshold
+            const topUpAmount = BigInt(5e17);   // Top up 0.5 A0GI
+
+            if (subAccount && subAccount.balance <= minBalance) {
+                console.log('⚠️ Sub-account balance low, topping up...');
+                console.log('Current balance:', subAccount.balance.toString(), 'Wei');
+                console.log('Threshold:', minBalance.toString(), 'Wei');
+                console.log('Top-up amount:', topUpAmount.toString(), 'Wei (0.5 A0GI)');
+
+                try {
+                    await broker.ledger.transferFund(
+                        providerAddress,
+                        "inference",
+                        topUpAmount
+                    );
+                    console.log('✅ Sub-account topped up with 0.5 A0GI');
+
+                    // Refresh account info
+                    subAccount = await broker.inference.getAccount(providerAddress);
+                    console.log('New sub-account balance:', subAccount.balance?.toString(), 'Wei');
+                } catch (transferErr) {
+                    console.error('❌ Failed to top up sub-account:', transferErr);
+                    throw new Error('子账户余额不足且充值失败。\n\n请前往"账户管理"页面检查主账本余额，然后点击"🔄 刷新连接"重试。');
+                }
+            }
+
+            console.log('✅ Sub-account ready, balance:', subAccount?.balance?.toString(), 'Wei');
+            console.log('===== SUB-ACCOUNT MANAGEMENT END =====');
+
             // Get service metadata for endpoint and model (using destructuring as per 0G docs)
             const metadata = await broker.inference.getServiceMetadata(providerAddress);
 
@@ -242,11 +312,10 @@ export default function ChatInterface({ broker, selectedService, onServiceSelect
                     `当前可用余额: ${balance} wei (约 ${(Number(balance) / 1e18).toFixed(6)} A0GI)\n` +
                     `需要费用: 约 0.4 A0GI\n\n` +
                     `解决方法:\n` +
-                    `1. 点击浏览器刷新按钮（F5）重新加载页面\n` +
-                    `2. 重新连接钱包\n` +
-                    `3. 前往"账户管理"页面点击"刷新"查看账本余额\n` +
-                    `4. 如果余额仍为0，请重新充值\n` +
-                    `5. 充值后等待30秒让交易确认，然后刷新页面`;
+                    `1. 前往"账户管理"页面充值\n` +
+                    `2. 充值成功后，点击页面右上角的"🔄 刷新连接"按钮\n` +
+                    `3. 等待几秒钟后余额会自动更新\n` +
+                    `4. 返回"Chat对话"页面继续使用`;
             } else if (errorMessage.includes('missing revert data')) {
                 errorMessage = `无法连接到该服务提供商。\n\n` +
                     `可能原因:\n` +

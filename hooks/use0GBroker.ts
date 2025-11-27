@@ -10,6 +10,7 @@ export function use0GBroker() {
     const [broker, setBroker] = useState<any>(null);
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [refreshCounter, setRefreshCounter] = useState(0);
 
     useEffect(() => {
         async function initBroker() {
@@ -24,6 +25,7 @@ export function use0GBroker() {
 
                 console.log('========== BROKER INITIALIZATION START ==========');
                 console.log('Wallet client:', walletClient);
+                console.log('Refresh counter:', refreshCounter);
 
                 // Convert viem wallet client to ethers provider and signer
                 // @ts-ignore - viem wallet client can be used as ethereum provider  
@@ -71,12 +73,18 @@ export function use0GBroker() {
         }
 
         initBroker();
-    }, [walletClient]);
+    }, [walletClient, refreshCounter]);
+
+    const refreshBroker = () => {
+        console.log('Manual broker refresh triggered');
+        setRefreshCounter(prev => prev + 1);
+    };
 
     return {
         broker,
         isLoading,
         error,
         isConnected: !!broker,
+        refreshBroker,
     };
 }
