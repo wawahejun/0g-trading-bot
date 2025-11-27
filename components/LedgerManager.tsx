@@ -190,6 +190,54 @@ export default function LedgerManager({ broker }: LedgerManagerProps) {
         }
     };
 
+    const withdrawFund = async () => {
+        if (!broker || !amount) return;
+
+        try {
+            setIsLoading(true);
+            setError(null);
+            console.log('Withdrawing fund with amount:', amount);
+            console.log('Broker instance:', broker);
+
+            // SDK expects amount in A0GI (number), not Wei (bigint)
+            await broker.ledger.refund(Number(amount));
+            console.log('Withdraw (refund) successful');
+
+            setAmount('');
+
+            // Wait a bit for transaction to be confirmed
+            console.log('Waiting for transaction confirmation...');
+            await new Promise(resolve => setTimeout(resolve, 3000));
+
+            await fetchLedgerInfo();
+        } catch (err: any) {
+            console.error('Failed to withdraw fund:', err);
+            console.error('Error details:', {
+                message: err?.message,
+                code: err?.code,
+                data: err?.data,
+                transaction: err?.transaction,
+            });
+
+            // Provide more helpful error messages
+            let errorMessage = err?.message || 'Failed to withdraw fund';
+
+            if (errorMessage.includes('missing revert data') || errorMessage.includes('CALL_EXCEPTION')) {
+                errorMessage = '取款失败。可能原因：\n' +
+                    '1. 您还没有创建账本（需要先创建账本才能取款）\n' +
+                    '2. 取款金额超过了可用余额\n' +
+                    '3. 合约地址配置错误\n' +
+                    '4. 参数格式不正确\n' +
+                    '5. Gas不足\n' +
+                    '请检查控制台查看详细错误信息';
+            }
+
+            setError(errorMessage);
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
     return (
         <div className="space-y-6">
             {/* Ledger Info Card */}
@@ -258,7 +306,7 @@ export default function LedgerManager({ broker }: LedgerManagerProps) {
                         />
                     </div>
 
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                         <button
                             onClick={createLedger}
                             disabled={!broker || !amount || isLoading}
@@ -272,6 +320,13 @@ export default function LedgerManager({ broker }: LedgerManagerProps) {
                             className="px-6 py-3 bg-white/5 hover:bg-white/10 border border-white/10 font-semibold rounded-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                             充值
+                        </button>
+                        <button
+                            onClick={withdrawFund}
+                            disabled={!broker || !amount || isLoading}
+                            className="px-6 py-3 bg-green-500/10 hover:bg-green-500/20 border border-green-500/20 text-green-400 font-semibold rounded-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                            取款
                         </button>
                         <button
                             onClick={deleteLedger}
